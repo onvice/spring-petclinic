@@ -1,0 +1,113 @@
+pipeline {
+	agent any
+	tools {
+		maven 'M3'
+	}
+	
+	environment {
+		//var ENV ACR
+		registryName = "philippe/petclinic:latest"
+		registryCredential = 'ACR'
+		registryUrl = 'philacr.azurecr.io' 
+	// var Env Mysql
+			MYSQL_PASSWORD = 'Petbdd02!'
+			MYSQL_USERNAME = 'philsysbdd'
+			MYSQL_SERVER_IP = 'philpetclinicbdd.mysql.database.azure.com'
+				dockerImage = 'philippe/petclinic' 
+		}
+	stages {
+	
+	
+	/*
+	
+				stage("build and SonarQube analysis") {
+			steps {
+					withSonarQubeEnv(installationName: 'sonarqube'){
+					
+					sh 'mvn clean install package org.sonarsource.scanner.maven:sonar-maven-plugin:3.9.0.2155:sonar'
+					echo 'mvn -Denv.MYSQL_SERVER_IP=${MYSQL_SERVER_IP} -Denv.MYSQL_USERNAME=${MYSQL_USERNAME} -Denv.MYSQL_PASSWORD=${MYSQL_PASSWORD} package -P MySQL'
+									}
+										  }
+				 }
+				stage("Quality Gate") {
+			steps {
+								timeout(time: 10, unit: 'MINUTES') {
+										waitForQualityGate abortPipeline: true
+								}
+			}
+		}
+	*/	
+	stage('Clone') {
+            steps {
+              echo 'Compilation in progress ...'
+             // sh 'rm -R /var/lib/jenkins/workspace/Pipeline_Spring'
+              sh 'git clone https://github.com/onvice/spring-petclinic'
+            }
+        }
+	
+		
+		 stage('Build Maven') {
+            steps{
+            checkout([$class: 'GitSCM', branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[credentialsId: 'a031cefa-d6cc-4d1f-9688-d90485896418', url: 'https://github.com/onvice/spring-petclinic']]])
+            //git credentialsId: '8f9b79ef-1649-4e14-b10a-6bbab91ca6b2', url: 'https://github.com/onvice/spring-petclinic'
+            //sh "mvn clean install -P MySQL -DskipTests"
+             // sh "mvn -Dmaven.test.failure.ignore=true clean package"
+              sh "mvn -Dmaven.test.failure.ignore=true clean package -PSQLpetclinic"
+            }
+        }
+               //sh "mvn -Dmaven.test.failure.ignore=true clean package -PMySQLAZURE"
+		
+		// Stopping Docker containers for cleaner Docker run
+		 stage('stop previous containers') {
+			 steps {
+								sh 'docker ps -f name=petclinic -q | xargs --no-run-if-empty docker container stop'
+								sh 'docker container ls -a -fname=petclinic -q | xargs -r docker container rm'
+					}
+		}
+		
+				stage('install tomcat in a docker') {
+						steps {
+								sh 'docker build -t philippe/petclinic .'
+								sh 'docker run -d -p 9200:8080 --name petclinic philippe/petclinic'
+						}
+				} 
+				
+		stage ('Build Docker image') {
+			steps {
+				script{
+				//	dockerImage = docker.build ("philippe/petclinic:tagtest")
+				dockerImage = docker.build registryName
+				}
+			}
+		}
+		
+				stage('Upload Image to ACR') {
+						steps{
+								script {
+										docker.withRegistry( "http://${registryUrl}", registryCredential ) {
+												dockerImage.push()
+										}
+								}
+						}
+				} 
+				
+		stage ('K8S Deploy') {
+             steps {
+                 script {
+                     kubernetesDeploy configs: 'deployment.yaml', kubeConfig: [path: ''], kubeconfigId: 'K8S', secretName: '', ssh: [sshCredentialsId: '*', sshServer: ''], textCredentials: [certificateAuthorityData: '', clientCertificateData: '', clientKeyData: '', serverUrl: 'https://']
+                    
+                    //kubernetesDeploy(
+                    //configs: 'deployement.yml',
+                    //credentialsId : 'K8S',
+                    //withKubeConfig([credentialsId: 'K8S'])
+                    //enableConfigSubstitution: false
+                    //{sh 'kubectl apply -f deploy.yml' }
+                    //sh 'kubectl apply -f deployment.yaml'
+                             
+                }
+           }
+        }		
+				
+	}
+}
+	
